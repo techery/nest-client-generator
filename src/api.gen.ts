@@ -19,12 +19,7 @@ export const startGenerateClientApi = (config: Config = defualtConfig) => {
             .getArguments()[0]
             .compilerNode.getText()
             .replace(/'/g, '');
-
-        // Remove all class Decorators & add Indectable decorator
         c.getDecorators().forEach(d => d.remove());
-        c.addDecorator({ name: 'Injectable', arguments: [] });
-
-        // Remove class constrctors & add one with di injectable
         c.getConstructors().forEach(constructor => constructor.remove());
         c.addConstructor({
             parameters: [
@@ -36,15 +31,9 @@ export const startGenerateClientApi = (config: Config = defualtConfig) => {
                 },
             ],
         });
-
-        // Add necessary imports
         file.addImportDeclaration({
             namedImports: ['APIService'],
             moduleSpecifier: './http.service',
-        });
-        file.addImportDeclaration({
-            namedImports: ['Injectable'],
-            moduleSpecifier: '@angular/core',
         });
         file.getImportStringLiterals()[0].getText();
         const methods = c.getMethods();
@@ -53,15 +42,16 @@ export const startGenerateClientApi = (config: Config = defualtConfig) => {
             const retrunType = method.getReturnType();
             const returnTypeNode = method.getReturnTypeNode();
             let resolver = 'resolve(data)';
-
             if (!returnTypeNode) {
                 method.setReturnType(retrunType.getText());
-            } else {
+            }
+            else {
                 const type = method
                     .getReturnTypeNode()
                     .getText()
                     .replace('Promise<', '')
                     .replace('>', '');
+
                 method.setReturnType(`Promise<${type}>`);
 
                 if (type !== 'any' && !type.includes('{')) {
@@ -69,7 +59,8 @@ export const startGenerateClientApi = (config: Config = defualtConfig) => {
                     if (isArray) {
                         const arrayType = type.replace('[]', '');
                         resolver = `resolve(data.map(d => new ${arrayType}(d)))`;
-                    } else {
+                    }
+                    else {
                         resolver = `resolve(new ${type}(data))`;
                     }
                 }
@@ -82,29 +73,30 @@ export const startGenerateClientApi = (config: Config = defualtConfig) => {
                 const args = d.getArguments();
                 const methodPath = args[0]
                     ? args[0].compilerNode
-                          .getText()
-                          .replace(/'/g, '')
-                          .split(':')[0]
+                        .getText()
+                        .replace(/'/g, '')
+                        .split(':')[0]
                     : '';
                 const body = method
                     .getParameters()
                     .filter(p => p.getDecorators().find(d => d.getName() === 'Body'))
                     .map(p => p.compilerNode.name.getText())
                     .join(', ');
-                const param = method
+                    
+                const model = method
                     .getParameters()
-                    .filter(p => p.getDecorators().find(d => d.getName() === 'Param'))
-                    .map(p => p.compilerNode.name.getText())
-                    .join(', ');
-
+                    .filter(p => p.getDecorators().find(d => (d.getName() === 'Body' || d.getName() === 'Query') && d.getArguments().length == 0))
+                    .map(p => p.compilerNode.name.getText())[0]
+                console.log(model)
                 replacment = config.decorators[name]
-                    .replace('{url}', basePath + (methodPath ? '/' + methodPath : '') + (param ? `' + ${param}+'` : ''))
-                    .replace('{body}', body ? ', ' + body : '');
+                    .replace('{url}', basePath + (methodPath ? '/' + methodPath : ''))
+                    .replace('{body}', body ? ', ' + body : '')
+                    .replace('{params}', model ? `, { params: ${model} }` : '');
                 d.remove();
-            });
-
+            }); 
             method.getParameters().forEach(p => {
-                const bodyDecorator = p.getDecorators().find(d => d.getName() === 'Body' || d.getName() === 'Param');
+                const bodyDecorator = p.getDecorators().find(d => d.getName() === 'Body' || d.getName() === 'Param' || d.getName() === 'Query');
+
                 if (!bodyDecorator) {
                     return p.remove();
                 }
@@ -116,14 +108,10 @@ export const startGenerateClientApi = (config: Config = defualtConfig) => {
             replacment = replacment.replace('{resolve}', resolver);
             implementation.setBodyText(replacment);
         });
-        for (const parameter of file.getDescendantsOfKind(SyntaxKind.Parameter)) {
-            if (parameter.findReferencesAsNodes().length === 0) {
-                parameter.remove();
-            }
-        }
+
         file.fixMissingImports()
             .organizeImports()
             .formatText();
-        writeFileSync('client/src/api/' + file.getBaseName(), file.getText());
+        writeFileSync(`${clientPath}/${file.getBaseName()}`, file.getText());
     });
 };
